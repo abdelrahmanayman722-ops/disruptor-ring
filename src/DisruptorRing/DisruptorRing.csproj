@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsAotCompatible>true</IsAotCompatible>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>Ultra-low-latency, zero-allocation lock-free ring buffer with 64-byte false-sharing cache padding and sequential consistency semantics</Description>
+    <Authors>Abdelrahman Ayman (@abdelrahmanayman722-ops)</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/abdelrahmanayman722-ops/disruptor-ring</RepositoryUrl>
+    <PackageTags>lock-free;high-performance;concurrency;ring-buffer;c-sharp;dotnet;low-latency;systems-architecture;cache-alignment;zero-allocation</PackageTags>
+  </PropertyGroup>
+
+</Project>
