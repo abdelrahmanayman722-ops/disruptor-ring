@@ -59,6 +59,8 @@ public sealed class MultiProducerSequencer : ISequencer
     {
         if (n < 1)
             throw new ArgumentOutOfRangeException(nameof(n), "Claim batch size must be >= 1.");
+        if (n > _bufferSize)
+            throw new ArgumentOutOfRangeException(nameof(n), $"Claim batch size {n} cannot exceed buffer size {_bufferSize}.");
 
         long current;
         long next;
@@ -93,15 +95,25 @@ public sealed class MultiProducerSequencer : ISequencer
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool TryNext(out long sequence)
+    public bool TryNext(out long sequence) => TryNext(1, out sequence);
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryNext(int n, out long sequence)
     {
+        if (n < 1 || n > _bufferSize)
+        {
+            sequence = -1L;
+            return false;
+        }
+
         long current;
         long next;
 
         do
         {
             current = _cursor.ReadAcquire();
-            next = current + 1;
+            next = current + n;
 
             long wrapPoint = next - _bufferSize;
             long cachedGating = _cachedGatingSequence.ReadAcquire();
@@ -133,15 +145,59 @@ public sealed class MultiProducerSequencer : ISequencer
         _waitStrategy.SignalAllWhenBlocking();
     }
 
-    /// <summary>
-    /// Checks whether the slot for the given sequence has been published.
-    /// </summary>
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Publish(long lo, long hi)
+    {
+        for (long l = lo; l <= hi; l++)
+        {
+            SetAvailable(l);
+        }
+        _waitStrategy.SignalAllWhenBlocking();
+    }
+
+    /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool IsAvailable(long sequence)
     {
+        if (sequence < 0)
+            return false;
+
+        if (sequence > _cursor.ReadAcquire())
+            return false;
+
         int index = (int)(sequence & _indexMask);
         int flag = (int)(sequence >> _indexShift);
         return Volatile.Read(ref _availableBuffer[index]) == flag;
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long WaitFor(long sequence)
+    {
+        long available = _waitStrategy.WaitFor(sequence, _cursor);
+        if (available < sequence)
+            return available;
+
+        while (!IsAvailable(sequence))
+        {
+            Thread.SpinWait(1);
+        }
+        return sequence;
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long GetHighestPublishedSequence(long lowerBound, long availableSequence)
+    {
+        for (long seq = lowerBound; seq <= availableSequence; seq++)
+        {
+            if (!IsAvailable(seq))
+            {
+                return seq - 1;
+            }
+        }
+        return availableSequence;
     }
 
     /// <inheritdoc/>

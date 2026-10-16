@@ -42,4 +42,44 @@ public class CapacityAndMaskTests
         Assert.Throws<ArgumentOutOfRangeException>(() => Disruptor.CreateSingleProducer<int>(capacity));
         Assert.Throws<ArgumentOutOfRangeException>(() => Disruptor.CreateMultiProducer<int>(capacity));
     }
+
+    [Fact]
+    public void BatchClaim_ExceedingCapacity_ThrowsArgumentOutOfRangeException()
+    {
+        var singleRing = Disruptor.CreateSingleProducer<int>(16);
+        Assert.Throws<ArgumentOutOfRangeException>(() => singleRing.Claim(17));
+        Assert.Throws<ArgumentOutOfRangeException>(() => singleRing.Claim(0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => singleRing.Claim(-5));
+
+        var multiRing = Disruptor.CreateMultiProducer<int>(16);
+        Assert.Throws<ArgumentOutOfRangeException>(() => multiRing.Claim(17));
+        Assert.Throws<ArgumentOutOfRangeException>(() => multiRing.Claim(0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => multiRing.Claim(-5));
+    }
+
+    [Fact]
+    public void IsAvailable_NegativeSequence_ReturnsFalse()
+    {
+        var singleRing = Disruptor.CreateSingleProducer<int>(16);
+        Assert.False(singleRing.Sequencer.IsAvailable(-1));
+        Assert.False(singleRing.Sequencer.IsAvailable(-100));
+
+        var multiRing = Disruptor.CreateMultiProducer<int>(16);
+        Assert.False(multiRing.Sequencer.IsAvailable(-1));
+        Assert.False(multiRing.Sequencer.IsAvailable(-100));
+    }
+
+    [Fact]
+    public void BatchTryNext_ExceedingCapacity_ReturnsFalse()
+    {
+        var singleRing = Disruptor.CreateSingleProducer<int>(16);
+        Assert.False(singleRing.Sequencer.TryNext(17, out _));
+        Assert.False(singleRing.Sequencer.TryNext(0, out _));
+        Assert.False(singleRing.Sequencer.TryNext(-1, out _));
+
+        var multiRing = Disruptor.CreateMultiProducer<int>(16);
+        Assert.False(multiRing.Sequencer.TryNext(17, out _));
+        Assert.False(multiRing.Sequencer.TryNext(0, out _));
+        Assert.False(multiRing.Sequencer.TryNext(-1, out _));
+    }
 }

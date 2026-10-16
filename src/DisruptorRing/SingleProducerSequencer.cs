@@ -53,6 +53,8 @@ public sealed class SingleProducerSequencer : ISequencer
     {
         if (n < 1)
             throw new ArgumentOutOfRangeException(nameof(n), "Claim batch size must be >= 1.");
+        if (n > _bufferSize)
+            throw new ArgumentOutOfRangeException(nameof(n), $"Claim batch size {n} cannot exceed buffer size {_bufferSize}.");
 
         long nextValue = _nextValue + n;
         long wrapPoint = nextValue - _bufferSize;
@@ -74,9 +76,19 @@ public sealed class SingleProducerSequencer : ISequencer
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool TryNext(out long sequence)
+    public bool TryNext(out long sequence) => TryNext(1, out sequence);
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryNext(int n, out long sequence)
     {
-        long nextValue = _nextValue + 1;
+        if (n < 1 || n > _bufferSize)
+        {
+            sequence = -1L;
+            return false;
+        }
+
+        long nextValue = _nextValue + n;
         long wrapPoint = nextValue - _bufferSize;
         long cachedGating = _cachedGatingSequence;
 
@@ -102,6 +114,39 @@ public sealed class SingleProducerSequencer : ISequencer
     {
         _cursor.WriteRelease(sequence);
         _waitStrategy.SignalAllWhenBlocking();
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Publish(long lo, long hi)
+    {
+        _cursor.WriteRelease(hi);
+        _waitStrategy.SignalAllWhenBlocking();
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool IsAvailable(long sequence)
+    {
+        if (sequence < 0)
+            return false;
+
+        return sequence <= _cursor.ReadAcquire();
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long WaitFor(long sequence)
+    {
+        return _waitStrategy.WaitFor(sequence, _cursor);
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long GetHighestPublishedSequence(long lowerBound, long availableSequence)
+    {
+        long cursor = _cursor.ReadAcquire();
+        return cursor >= availableSequence ? availableSequence : cursor;
     }
 
     /// <inheritdoc/>

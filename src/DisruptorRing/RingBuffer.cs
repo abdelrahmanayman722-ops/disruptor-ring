@@ -34,7 +34,7 @@ public sealed class RingBuffer<T> where T : unmanaged
     /// <summary>
     /// Gets a value indicating whether the ring buffer is currently empty.
     /// </summary>
-    public bool IsEmpty => _consumerSequence.ReadAcquire() >= _sequencer.Cursor;
+    public bool IsEmpty => !_sequencer.IsAvailable(_consumerSequence.ReadAcquire() + 1);
 
     /// <summary>
     /// Gets the sequencer coordinating buffer claims.
@@ -110,10 +110,19 @@ public sealed class RingBuffer<T> where T : unmanaged
     public long Claim() => _sequencer.Next();
 
     /// <summary>
+    /// Claims a batch of <paramref name="n"/> sequence numbers for writing directly by reference.
+    /// Returns the highest sequence in the claimed batch.
+    /// </summary>
+    /// <param name="n">Number of slots to claim.</param>
+    /// <returns>The highest claimed sequence.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long Claim(int n) => _sequencer.Next(n);
+
+    /// <summary>
     /// Returns a direct reference to the slot payload at the claimed <paramref name="sequence"/>,
     /// enabling zero-copy in-place mutations.
     /// </summary>
-    /// <param name="sequence">The sequence claimed via <see cref="Claim"/>.</param>
+    /// <param name="sequence">The sequence claimed via <see cref="Claim()"/>.</param>
     /// <returns>Reference to the slot payload.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T Get(long sequence)
@@ -135,6 +144,23 @@ public sealed class RingBuffer<T> where T : unmanaged
     }
 
     /// <summary>
+    /// Commits a batch of claimed sequences from <paramref name="lo"/> to <paramref name="hi"/>,
+    /// making them available to consumers.
+    /// </summary>
+    /// <param name="lo">Lowest sequence of the batch.</param>
+    /// <param name="hi">Highest sequence of the batch.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Commit(long lo, long hi)
+    {
+        for (long s = lo; s <= hi; s++)
+        {
+            int index = (int)(s & _indexMask);
+            _slots[index].Sequence = s;
+        }
+        _sequencer.Publish(lo, hi);
+    }
+
+    /// <summary>
     /// Attempts to consume the next available item from the ring buffer.
     /// </summary>
     /// <param name="item">The consumed value if available.</param>
@@ -144,16 +170,8 @@ public sealed class RingBuffer<T> where T : unmanaged
     {
         long currentConsumer = _consumerSequence.ReadAcquire();
         long nextSequence = currentConsumer + 1;
-        long cursor = _sequencer.Cursor;
 
-        if (nextSequence > cursor)
-        {
-            item = default;
-            return false;
-        }
-
-        // For multi-producer sequencers, verify slot readiness
-        if (_sequencer is MultiProducerSequencer multi && !multi.IsAvailable(nextSequence))
+        if (!_sequencer.IsAvailable(nextSequence))
         {
             item = default;
             return false;
@@ -167,7 +185,7 @@ public sealed class RingBuffer<T> where T : unmanaged
     }
 
     /// <summary>
-    /// Consumes the next item, spinning with <see cref="Thread.SpinWait"/> until one becomes available.
+    /// Consumes the next item, coordinating with the sequencer's wait strategy.
     /// </summary>
     /// <returns>The consumed item.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -176,18 +194,7 @@ public sealed class RingBuffer<T> where T : unmanaged
         long currentConsumer = _consumerSequence.ReadAcquire();
         long nextSequence = currentConsumer + 1;
 
-        while (nextSequence > _sequencer.Cursor)
-        {
-            Thread.SpinWait(1);
-        }
-
-        if (_sequencer is MultiProducerSequencer multi)
-        {
-            while (!multi.IsAvailable(nextSequence))
-            {
-                Thread.SpinWait(1);
-            }
-        }
+        _sequencer.WaitFor(nextSequence);
 
         int index = (int)(nextSequence & _indexMask);
         T item = _slots[index].Value;
@@ -203,9 +210,13 @@ public sealed class RingBuffer<T> where T : unmanaged
     {
         get
         {
-            long produced = _sequencer.Cursor;
             long consumed = _consumerSequence.ReadAcquire();
-            long diff = produced - consumed;
+            long cursor = _sequencer.Cursor;
+            if (consumed >= cursor)
+                return 0;
+
+            long highest = _sequencer.GetHighestPublishedSequence(consumed + 1, cursor);
+            long diff = highest - consumed;
             return diff > 0 ? (int)diff : 0;
         }
     }

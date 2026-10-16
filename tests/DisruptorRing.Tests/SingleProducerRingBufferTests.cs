@@ -79,4 +79,53 @@ public class SingleProducerRingBufferTests
 
         await consumerTask;
     }
+
+    [Fact]
+    public void BatchClaimAndCommit_ZeroCopy_Succeeds()
+    {
+        var ring = Disruptor.CreateSingleProducer<int>(64);
+        int batchSize = 8;
+        long hi = ring.Claim(batchSize);
+        long lo = hi - batchSize + 1;
+
+        for (long s = lo; s <= hi; s++)
+        {
+            ring.Get(s) = (int)(s * 5);
+        }
+        ring.Commit(lo, hi);
+
+        Assert.Equal(batchSize, ring.AvailableCount);
+
+        for (long s = lo; s <= hi; s++)
+        {
+            Assert.True(ring.TryConsume(out int val));
+            Assert.Equal((int)(s * 5), val);
+        }
+        Assert.True(ring.IsEmpty);
+    }
+
+    [Fact]
+    public async Task SingleProducer_YieldingWaitStrategy_ConsumesSuccessfully()
+    {
+        var sequencer = new SingleProducerSequencer(64, new YieldingWaitStrategy());
+        var ring = new RingBuffer<int>(sequencer);
+
+        var consumer = Task.Run(() =>
+        {
+            int sum = 0;
+            for (int i = 0; i < 50; i++)
+            {
+                sum += ring.Consume();
+            }
+            return sum;
+        });
+
+        for (int i = 1; i <= 50; i++)
+        {
+            ring.Publish(i);
+        }
+
+        int result = await consumer;
+        Assert.Equal(1275, result);
+    }
 }

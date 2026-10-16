@@ -36,10 +36,47 @@ public interface ISequencer
     bool TryNext(out long sequence);
 
     /// <summary>
+    /// Attempts to claim the next batch of <paramref name="n"/> sequence numbers without blocking.
+    /// </summary>
+    /// <param name="n">The number of slots to claim.</param>
+    /// <param name="sequence">The highest claimed sequence in the batch if successful.</param>
+    /// <returns><c>true</c> if successfully claimed; <c>false</c> if insufficient capacity.</returns>
+    bool TryNext(int n, out long sequence);
+
+    /// <summary>
     /// Publishes the specified sequence number, making it visible to downstream consumers.
     /// </summary>
     /// <param name="sequence">The sequence number to publish.</param>
     void Publish(long sequence);
+
+    /// <summary>
+    /// Publishes a batch of claimed sequence numbers from <paramref name="lo"/> to <paramref name="hi"/>.
+    /// </summary>
+    /// <param name="lo">The lowest sequence in the batch.</param>
+    /// <param name="hi">The highest sequence in the batch.</param>
+    void Publish(long lo, long hi);
+
+    /// <summary>
+    /// Checks whether the slot for the given sequence number is published and available for consumption.
+    /// </summary>
+    /// <param name="sequence">The sequence number to check.</param>
+    /// <returns><c>true</c> if available; otherwise, <c>false</c>.</returns>
+    bool IsAvailable(long sequence);
+
+    /// <summary>
+    /// Blocks or spins until the specified sequence is published and available for consumption.
+    /// </summary>
+    /// <param name="sequence">The sequence number to wait for.</param>
+    /// <returns>The available sequence.</returns>
+    long WaitFor(long sequence);
+
+    /// <summary>
+    /// Determines the highest contiguously published sequence between <paramref name="lowerBound"/> and <paramref name="availableSequence"/>.
+    /// </summary>
+    /// <param name="lowerBound">The start sequence of the query range.</param>
+    /// <param name="availableSequence">The upper bound sequence to check.</param>
+    /// <returns>The highest contiguous published sequence.</returns>
+    long GetHighestPublishedSequence(long lowerBound, long availableSequence);
 
     /// <summary>
     /// Checks whether the buffer has available capacity for <paramref name="requiredCapacity"/> slots.
